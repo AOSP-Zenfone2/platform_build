@@ -239,7 +239,10 @@ ifeq ($(TARGET_ARCH),arm)
 endif
 
 ifeq ($(HOST_OS),darwin)
+
   MAKE_FLAGS := C_INCLUDE_PATH=$(ANDROID_BUILD_TOP)/external/elfutils/libelf
+
+  MAKE_FLAGS := C_INCLUDE_PATH=$(ANDROID_BUILD_TOP)/external/elfutils/0.153/libelf/
 
 endif
 
