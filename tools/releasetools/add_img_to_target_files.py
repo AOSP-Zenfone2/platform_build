@@ -28,7 +28,6 @@ if sys.hexversion < 0x02070000:
   print >> sys.stderr, "Python 2.7 or newer is required."
   sys.exit(1)
 
-import datetime
 import errno
 import os
 import tempfile
@@ -41,9 +40,6 @@ OPTIONS = common.OPTIONS
 
 OPTIONS.add_missing = False
 OPTIONS.rebuild_recovery = False
-OPTIONS.replace_verity_public_key = False
-OPTIONS.replace_verity_private_key = False
-OPTIONS.verity_signer_path = None
 
 def AddSystem(output_zip, prefix="IMAGES/", recovery_img=None, boot_img=None):
   """Turn the contents of SYSTEM into a system image and store it in
@@ -123,12 +119,6 @@ def CreateImage(input_dir, info_dict, what, block_list=None):
   if fstab:
     image_props["fs_type"] = fstab["/" + what].fs_type
 
-  # Use a fixed timestamp (01/01/2009) when packaging the image.
-  # Bug: 24377993
-  epoch = datetime.datetime.fromtimestamp(0)
-  timestamp = (datetime.datetime(2009, 1, 1) - epoch).total_seconds()
-  image_props["timestamp"] = int(timestamp)
-
   if what == "system":
     fs_config_prefix = ""
   else:
@@ -180,12 +170,6 @@ def AddUserdata(output_zip, prefix="IMAGES/"):
 
   print "creating userdata.img..."
 
-  # Use a fixed timestamp (01/01/2009) when packaging the image.
-  # Bug: 24377993
-  epoch = datetime.datetime.fromtimestamp(0)
-  timestamp = (datetime.datetime(2009, 1, 1) - epoch).total_seconds()
-  image_props["timestamp"] = int(timestamp)
-
   # The name of the directory it is making an image out of matters to
   # mkyaffs2image.  So we create a temp dir, and within it we create an
   # empty dir named "data", and build the image from that.
@@ -207,6 +191,42 @@ def AddUserdata(output_zip, prefix="IMAGES/"):
   os.rmdir(temp_dir)
 
 
+def AddUserdataExtra(output_zip):
+  """Create extra userdata image and store it in output_zip."""
+
+  image_props = build_image.ImagePropFromGlobalDict(OPTIONS.info_dict,
+                                                  "data_extra")
+  # If no userdataextra_size is provided for extfs, skip userdata_extra.img.
+  if (image_props.get("fs_type", "").startswith("ext") and
+      not image_props.get("partition_size")):
+    return
+
+  extra_name = image_props.get("partition_name", "extra")
+
+  print "creating userdata_%s.img..." % extra_name
+
+  # The name of the directory it is making an image out of matters to
+  # mkyaffs2image.  So we create a temp dir, and within it we create an
+  # empty dir named "data", and build the image from that.
+  temp_dir = tempfile.mkdtemp()
+  user_dir = os.path.join(temp_dir, "data")
+  os.mkdir(user_dir)
+  img = tempfile.NamedTemporaryFile()
+
+  fstab = OPTIONS.info_dict["fstab"]
+  if fstab:
+    image_props["fs_type" ] = fstab["/data"].fs_type
+  succ = build_image.BuildImage(user_dir, image_props, img.name)
+  assert succ, "build userdata_%s.img image failed" % extra_name
+
+  # Disable size check since this fetches original data partition size
+  #common.CheckSize(img.name, "userdata_extra.img", OPTIONS.info_dict)
+  output_zip.write(img.name, "userdata_%s.img" % extra_name)
+  img.close()
+  os.rmdir(user_dir)
+  os.rmdir(temp_dir)
+
+
 def AddCache(output_zip, prefix="IMAGES/"):
   """Create an empty cache image and store it in output_zip."""
 
@@ -222,12 +242,6 @@ def AddCache(output_zip, prefix="IMAGES/"):
     return
 
   print "creating cache.img..."
-
-  # Use a fixed timestamp (01/01/2009) when packaging the image.
-  # Bug: 24377993
-  epoch = datetime.datetime.fromtimestamp(0)
-  timestamp = (datetime.datetime(2009, 1, 1) - epoch).total_seconds()
-  image_props["timestamp"] = int(timestamp)
 
   # The name of the directory it is making an image out of matters to
   # mkyaffs2image.  So we create a temp dir, and within it we create an
@@ -312,33 +326,26 @@ def AddImagesToTargetFiles(filename):
     AddVendor(output_zip)
   banner("userdata")
   AddUserdata(output_zip)
+  banner("extrauserdata")
+  AddUserdataExtra(output_zip)
   banner("cache")
   AddCache(output_zip)
 
   common.ZipClose(output_zip)
 
 def main(argv):
-  def option_handler(o, a):
+  def option_handler(o, _):
     if o in ("-a", "--add_missing"):
       OPTIONS.add_missing = True
     elif o in ("-r", "--rebuild_recovery",):
       OPTIONS.rebuild_recovery = True
-    elif o == "--replace_verity_private_key":
-      OPTIONS.replace_verity_private_key = (True, a)
-    elif o == "--replace_verity_public_key":
-      OPTIONS.replace_verity_public_key = (True, a)
-    elif o == "--verity_signer_path":
-      OPTIONS.verity_signer_path = a
     else:
       return False
     return True
 
   args = common.ParseOptions(
       argv, __doc__, extra_opts="ar",
-      extra_long_opts=["add_missing", "rebuild_recovery",
-                       "replace_verity_public_key=",
-                       "replace_verity_private_key=",
-                       "verity_signer_path="],
+      extra_long_opts=["add_missing", "rebuild_recovery"],
       extra_option_handler=option_handler)
 
 
